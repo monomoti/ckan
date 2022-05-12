@@ -15,6 +15,12 @@ RUN dpkg-reconfigure --frontend=noninteractive locales
 RUN update-locale LANG=${LC_ALL}
 
 # Install required system packages
+# RUN rm -rf /var/lib/apt/lists/*
+# RUN apt-get clean
+RUN touch /etc/apt/apt.conf.d/99fixbadproxy && \
+ echo "Acquire::http::Pipeline-Depth 0;" >> /etc/apt/apt.conf.d/99fixbadproxy && \
+ echo "Acquire::http::No-Cache true;" >> /etc/apt/apt.conf.d/99fixbadproxy && \
+ echo "Acquire::BrokenProxy    true;" >> /etc/apt/apt.conf.d/99fixbadproxy
 RUN apt-get -q -y update \
     && DEBIAN_FRONTEND=noninteractive apt-get -q -y upgrade \
     && apt-get -q -y install \
@@ -24,6 +30,7 @@ RUN apt-get -q -y update \
         python3-venv \
         python3-wheel \
         libpq-dev \
+        libxml2 \
         libxml2-dev \
         libxslt-dev \
         libgeos-dev \
@@ -35,6 +42,8 @@ RUN apt-get -q -y update \
         vim \
         wget \
         curl \
+        openssl \
+        swig \
     && apt-get -q clean \
     && rm -rf /var/lib/apt/lists/*
 

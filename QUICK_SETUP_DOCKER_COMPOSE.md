@@ -32,7 +32,7 @@ docker exec -it ckan /bin/bash -c "export TERM=xterm; exec bash"
 
 ```
 source $CKAN_VENV/bin/activate && cd $CKAN_VENV/src/
-pip install -e "git+https://github.com/geosolutions-it/ckanext-azure-auth.git#egg=ckanext-azure-auth"
+pip install -e "git+https://github.com/monomoti/ckanext-azure-auth.git#egg=ckanext-azure-auth"
 pip install cryptography
 ```
 

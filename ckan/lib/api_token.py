@@ -73,11 +73,17 @@ def postprocess(data: dict[str, Any], jti: str,
 
 
 def decode(encoded: str, **kwargs: Any) -> Optional[Mapping[str, Any]]:
+    data = None
     for plugin in _get_plugins():
-        data = plugin.decode_api_token(encoded, **kwargs)
+        try:
+            data = plugin.decode_api_token(encoded, **kwargs)
+        except Exception as e:
+            data = None
+
         if data:
             break
-    else:
+
+    if data is None:
         try:
             data = jwt.decode(
                 encoded,
@@ -90,6 +96,7 @@ def decode(encoded: str, **kwargs: Any) -> Optional[Mapping[str, Any]]:
             # expired tokens
             log.error(u"Cannot decode JWT token: %s", e)
             data = None
+
     return data
 
 

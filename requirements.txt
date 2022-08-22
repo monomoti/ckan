@@ -162,3 +162,8 @@ zope-interface==5.4.0
 
 # The following packages are considered to be unsafe in a requirements file:
 # setuptools
+
+# the following packages are for azure_auth plugin
+xml_python==0.4.3
+M2Crypto==0.37.1
+cryptography==3.4.7

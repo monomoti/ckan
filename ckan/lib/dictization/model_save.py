@@ -1,6 +1,7 @@
 # encoding: utf-8
 from __future__ import annotations
 
+import copy
 import datetime
 import uuid
 import logging
@@ -271,7 +272,8 @@ def relationship_list_save(
         relationship_list.append(relationship)
 
 def package_dict_save(
-        pkg_dict: dict[str, Any], context: Context) -> 'model.Package':
+        pkg_dict: dict[str, Any], context: Context, 
+        include_plugin_data: bool = False) -> 'model.Package':
     model = context["model"]
     package = context.get("package")
     if package:
@@ -282,6 +284,11 @@ def package_dict_save(
         del pkg_dict['metadata_created']
     if 'metadata_modified' in pkg_dict:
         del pkg_dict['metadata_modified']
+
+    plugin_data = pkg_dict.pop('plugin_data', None)    
+    if include_plugin_data:
+        pkg_dict['plugin_data'] = copy.deepcopy(
+            plugin_data) if plugin_data else plugin_data
 
     pkg = d.table_dict_save(pkg_dict, Package, context)
 
@@ -528,25 +535,6 @@ def task_status_dict_save(task_status_dict: dict[str, Any],
         task_status_dict, model.TaskStatus, context)
     return task_status
 
-def activity_dict_save(activity_dict: dict[str, Any],
-                       context: Context) -> 'model.Activity':
-
-    model = context['model']
-    session = context['session']
-    user_id = activity_dict['user_id']
-    object_id = activity_dict['object_id']
-    activity_type = activity_dict['activity_type']
-    if 'data' in activity_dict:
-        data = activity_dict['data']
-    else:
-        data = None
-    activity_obj = model.Activity(user_id, object_id,
-            activity_type, data)
-    session.add(activity_obj)
-
-    # TODO: Handle activity details.
-
-    return activity_obj
 
 def vocabulary_tag_list_save(
         new_tag_dicts: list[dict[str, Any]],

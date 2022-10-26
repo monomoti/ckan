@@ -161,7 +161,17 @@ def make_config(output_path: str, include_plugin: list[str]):
     for plugin in include_plugin:
         config_declaration.load_plugin(plugin)
 
-    variables = {"declaration": config_declaration.into_ini(False, False)}
+    variables = {
+        "app_main_section": config_declaration.into_ini(
+            minimal=False,
+            include_docs=False,
+        ),
+        "default_section": config_declaration.into_ini(
+            minimal=False,
+            include_docs=True,
+            section="DEFAULT"
+        )
+    }
     with open(template_loc, u'r') as file_in:
         template = string.Template(file_in.read())
         try:
@@ -204,7 +214,7 @@ def migration(plugin: str, message: str):
 
 
 _factories = {
-    "activity": "ckan.tests.factories:Activity",
+    "activity": "ckanext.activity.tests.conftest:ActivityFactory",
     "api-token": "ckan.tests.factories:APIToken",
     "dataset": "ckan.tests.factories:Dataset",
     "group": "ckan.tests.factories:Group",

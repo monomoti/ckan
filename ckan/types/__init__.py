@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from functools import partial
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Dict,
@@ -21,6 +22,10 @@ from .model import (
     Model, AlchemySession,
     Query,
 )
+
+if TYPE_CHECKING:
+    from ckanext.activity.model import Activity
+
 
 __all__ = [
     "Response", "Request",
@@ -83,7 +88,6 @@ class Context(TypedDict, total=False):
     user_is_admin: bool
     search_query: bool
     return_query: bool
-    return_minimal: bool
     return_id_only: bool
     defer_commit: bool
     reset_password: bool
@@ -112,7 +116,7 @@ class Context(TypedDict, total=False):
     package: "Model.Package"
     vocabulary: "Model.Vocabulary"
     tag: "Model.Tag"
-    activity: "Model.Activity"
+    activity: "Activity"
     task_status: "Model.TaskStatus"
     resource: "Model.Resource"
     resource_view: "Model.ResourceView"

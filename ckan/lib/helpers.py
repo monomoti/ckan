@@ -18,6 +18,7 @@ import pprint
 import copy
 import uuid
 import functools
+import unicodedata
 
 from collections import defaultdict
 from typing import (
@@ -27,7 +28,7 @@ from typing import (
 import dominate.tags as dom_tags
 from markdown import markdown
 from bleach import clean as bleach_clean, ALLOWED_TAGS, ALLOWED_ATTRIBUTES
-from ckan.common import asbool, config
+from ckan.common import asbool, config, current_user
 from flask import flash
 from flask import get_flashed_messages as _flask_get_flashed_messages
 from flask import redirect as _flask_redirect
@@ -35,12 +36,11 @@ from flask import _request_ctx_stack
 from flask import url_for as _flask_default_url_for
 from werkzeug.routing import BuildError as FlaskRouteBuildError
 from ckan.lib import i18n
+from ckan.plugins.core import plugin_loaded
 
 from urllib.parse import (
     urlencode, quote, unquote, urlparse, urlunparse
 )
-
-import jinja2
 
 import ckan.config
 import ckan.exceptions
@@ -82,16 +82,30 @@ LEGACY_ROUTE_NAMES = {
     'about': 'home.about',
     'search': 'dataset.search',
     'dataset_read': 'dataset.read',
-    'dataset_activity': 'dataset.activity',
     'dataset_groups': 'dataset.groups',
     'group_index': 'group.index',
     'group_about': 'group.about',
     'group_read': 'group.read',
-    'group_activity': 'group.activity',
     'organizations_index': 'organization.index',
-    'organization_activity': 'organization.activity',
     'organization_read': 'organization.read',
     'organization_about': 'organization.about',
+
+    # Deprecated since v2.10
+    'dataset_activity': 'activity.package_activity',
+    'dataset.activity': 'activity.package_activity',
+    'group_activity': 'activity.group_activity',
+    'group.activity': 'activity.group_activity',
+    'organization_activity': 'activity.organization_activity',
+    'organization.activity': 'activity.organization_activity',
+    "user.activity": "activity.user_activity",
+    "dashboard.index": "activity.dashboard",
+    "dataset.changes_multiple": "activity.package_changes_multiple",
+    "dataset.changes": "activity.package_changes",
+    "group.changes_multiple": "activity.group_changes_multiple",
+    "group.changes": "activity.group_changes",
+    "organization.changes_multiple": "activity.organization_changes_multiple",
+    "organization.changes": "activity.organization_changes",
+
 }
 
 
@@ -652,6 +666,15 @@ def lang() -> Optional[str]:
 
 
 @core_helper
+def strxfrm(s: str) -> str:
+    '''
+    Transform a string to one that can be used in locale-aware comparisons.
+    Override this helper if you have different text sorting needs.
+    '''
+    return unicodedata.normalize('NFD', s).lower()
+
+
+@core_helper
 def ckan_version() -> str:
     '''Return CKAN version'''
     return ckan.__version__
@@ -676,8 +699,8 @@ def is_rtl_language() -> bool:
 
 
 @core_helper
-def get_rtl_css() -> str:
-    return config.get_value('ckan.i18n.rtl_css')
+def get_rtl_theme() -> str:
+    return config.get_value('ckan.i18n.rtl_theme')
 
 
 @core_helper
@@ -958,6 +981,23 @@ def default_package_type() -> str:
     return str(config.get('ckan.default.package_type', "dataset"))
 
 
+def _humanize_activity(object_type: str, activity_type: str) -> str:
+    """ Humanize activity types for custom objects
+
+        Example::
+
+          >>> _humanize_activity('Custom user', 'new_user')
+          'New custom user'
+          >>> _humanize_activity('dataset', 'changed_package')
+          'Changed dataset'
+
+    """
+    res = activity_type.replace('_', ' ').lower()
+    for obj in ['package', 'user', 'group', 'organization']:
+        res = res.replace(obj, object_type)
+    return res.capitalize()
+
+
 @core_helper
 def humanize_entity_type(entity_type: str, object_type: str,
                          purpose: str) -> Optional[str]:
@@ -1008,6 +1048,9 @@ def humanize_entity_type(entity_type: str, object_type: str,
     if (entity_type, object_type) == ("package", "dataset"):
         # special case for the previous condition
         return
+
+    if entity_type == "activity":
+        return _humanize_activity(object_type, activity_type=purpose)
 
     log.debug(
         u'Humanize %s of type %s for %s', entity_type, object_type, purpose)
@@ -1194,9 +1237,9 @@ def sorted_extras(package_extras: list[dict[str, Any]],
 @core_helper
 def check_access(
         action: str, data_dict: Optional[dict[str, Any]] = None) -> bool:
-    if not getattr(g, u'user', None):
-        g.user = ''
-    context = cast(Context, {'model': model, 'user': g.user})
+    context = cast(Context, {
+        'model': model,
+        'user': current_user.name})
     if not data_dict:
         data_dict = {}
     try:
@@ -1772,10 +1815,11 @@ def follow_button(obj_type: str, obj_id: str) -> str:
     obj_type = obj_type.lower()
     assert obj_type in _follow_objects
     # If the user is logged in show the follow/unfollow button
-    if g.user:
+    user = current_user.name
+    if user:
         context = cast(
             Context,
-            {'model': model, 'session': model.Session, 'user': g.user})
+            {'model': model, 'session': model.Session, 'user': user})
         action = 'am_following_%s' % obj_type
         following = logic.get_action(action)(context, {'id': obj_id})
         return snippet('snippets/follow_button.html',
@@ -1802,7 +1846,11 @@ def follow_count(obj_type: str, obj_id: str) -> int:
     assert obj_type in _follow_objects
     action = '%s_follower_count' % obj_type
     context = cast(
-        Context, {'model': model, 'session': model.Session, 'user': g.user}
+        Context, {
+            'model': model,
+            'session': model.Session,
+            'user': current_user.name
+        }
     )
     return logic.get_action(action)(context, {'id': obj_id})
 
@@ -1961,7 +2009,7 @@ def organizations_available(permission: str = 'manage_group',
     '''Return a list of organizations that the current user has the specified
     permission for.
     '''
-    context: Context = {'user': g.user}
+    context: Context = {'user': current_user.name}
     data_dict = {
         'permission': permission,
         'include_dataset_count': include_dataset_count}
@@ -1978,68 +2026,17 @@ def roles_translated() -> dict[str, str]:
 def user_in_org_or_group(group_id: str) -> bool:
     ''' Check if user is in a group or organization '''
     # we need a user
-    if not g.userobj:
+    if current_user.is_anonymous:
         return False
     # sysadmins can do anything
-    if g.userobj.sysadmin:
+    if current_user.sysadmin:  # type: ignore
         return True
     query = model.Session.query(model.Member) \
         .filter(model.Member.state == 'active') \
         .filter(model.Member.table_name == 'user') \
         .filter(model.Member.group_id == group_id) \
-        .filter(model.Member.table_id == g.userobj.id)
+        .filter(model.Member.table_id == current_user.id)  # type: ignore
     return len(query.all()) != 0
-
-
-@core_helper
-def dashboard_activity_stream(user_id: str,
-                              filter_type: Optional[str] = None,
-                              filter_id: Optional[str] = None,
-                              offset: int = 0) -> list[dict[str, Any]]:
-    '''Return the dashboard activity stream of the current user.
-
-    :param user_id: the id of the user
-    :type user_id: string
-
-    :param filter_type: the type of thing to filter by
-    :type filter_type: string
-
-    :param filter_id: the id of item to filter by
-    :type filter_id: string
-
-    :returns: an activity stream as an HTML snippet
-    :rtype: string
-
-    '''
-    context = cast(
-        Context, {'model': model, 'session': model.Session, 'user': g.user})
-
-    if filter_type:
-        action_functions = {
-            'dataset': 'package_activity_list',
-            'user': 'user_activity_list',
-            'group': 'group_activity_list',
-            'organization': 'organization_activity_list',
-        }
-        action_function = logic.get_action(action_functions[filter_type])
-        return action_function(context, {'id': filter_id, 'offset': offset})
-    else:
-        return logic.get_action('dashboard_activity_list')(
-            context, {'offset': offset})
-
-
-@core_helper
-def recently_changed_packages_activity_stream(
-        limit: Optional[int] = None) -> list[dict[str, Any]]:
-    if limit:
-        data_dict = {'limit': limit}
-    else:
-        data_dict = {}
-    context = cast(
-        Context, {'model': model, 'session': model.Session, 'user': g.user}
-    )
-    return logic.get_action('recently_changed_packages_activity_list')(
-        context, data_dict)
 
 
 @core_helper
@@ -2407,20 +2404,6 @@ localised_filesize = formatters.localised_filesize
 
 
 @core_helper
-def new_activities() -> Optional[int]:
-    '''Return the number of activities for the current user.
-
-    See :func:`logic.action.get.dashboard_new_activities_count` for more
-    details.
-
-    '''
-    if not g.userobj:
-        return None
-    action = logic.get_action('dashboard_new_activities_count')
-    return action({}, {})
-
-
-@core_helper
 def uploads_enabled() -> bool:
     if uploader.get_storage_path():
         return True
@@ -2608,7 +2591,15 @@ def get_translated(data_dict: dict[str, Any], field: str) -> Union[str, Any]:
     try:
         return data_dict[field + u'_translated'][language]
     except KeyError:
-        return data_dict.get(field, '')
+        pass
+    # Check the base language, en_GB->en
+    try:
+        base_language = language.split('_')[0]
+        if base_language != language:
+            return data_dict[field + u'_translated'][base_language]
+    except KeyError:
+        pass
+    return data_dict.get(field, '')
 
 
 @core_helper
@@ -2635,6 +2626,7 @@ core_helper(localised_number)
 core_helper(localised_SI_number)
 core_helper(localised_nice_date)
 core_helper(localised_filesize)
+core_helper(plugin_loaded)
 # Useful additionsfrom the i18n library.
 core_helper(i18n.get_available_locales)
 core_helper(i18n.get_locales_dict)
@@ -2685,101 +2677,14 @@ def sanitize_id(id_: str) -> str:
 
 
 @core_helper
-def compare_pkg_dicts(old: dict[str, Any], new: dict[str, Any],
-                      old_activity_id: str) -> list[dict[str, Any]]:
-    '''
-    Takes two package dictionaries that represent consecutive versions of
-    the same dataset and returns a list of detailed & formatted summaries of
-    the changes between the two versions. old and new are the two package
-    dictionaries. The function assumes that both dictionaries will have
-    all of the default package dictionary keys, and also checks for fields
-    added by extensions and extra fields added by the user in the web
-    interface.
-
-    Returns a list of dictionaries, each of which corresponds to a change
-    to the dataset made in this revision. The dictionaries each contain a
-    string indicating the type of change made as well as other data necessary
-    to form a detailed summary of the change.
-    '''
-    from ckan.lib.changes import check_metadata_changes, check_resource_changes
-    change_list: list[dict[str, Any]] = []
-
-    check_metadata_changes(change_list, old, new)
-
-    check_resource_changes(change_list, old, new, old_activity_id)
-
-    # if the dataset was updated but none of the fields we check were changed,
-    # display a message stating that
-    if len(change_list) == 0:
-        change_list.append({u'type': 'no_change'})
-
-    return change_list
-
-
-@core_helper
-def compare_group_dicts(
-        old: dict[str, Any], new: dict[str, Any], old_activity_id: str):
-    '''
-    Takes two package dictionaries that represent consecutive versions of
-    the same organization and returns a list of detailed & formatted summaries
-    of the changes between the two versions. old and new are the two package
-    dictionaries. The function assumes that both dictionaries will have
-    all of the default package dictionary keys, and also checks for fields
-    added by extensions and extra fields added by the user in the web
-    interface.
-
-    Returns a list of dictionaries, each of which corresponds to a change
-    to the dataset made in this revision. The dictionaries each contain a
-    string indicating the type of change made as well as other data necessary
-    to form a detailed summary of the change.
-    '''
-    from ckan.lib.changes import check_metadata_org_changes
-    change_list: list[dict[str, Any]] = []
-
-    check_metadata_org_changes(change_list, old, new)
-
-    # if the organization was updated but none of the fields we check
-    # were changed, display a message stating that
-    if len(change_list) == 0:
-        change_list.append({u'type': 'no_change'})
-
-    return change_list
-
-
-@core_helper
-def activity_list_select(pkg_activity_list: list[dict[str, Any]],
-                         current_activity_id: str) -> list[Markup]:
-    '''
-    Builds an HTML formatted list of options for the select lists
-    on the "Changes" summary page.
-    '''
-    select_list = []
-    template = jinja2.Template(
-        u'<option value="{{activity_id}}" {{selected}}>'
-        '{{timestamp}}</option>',
-        autoescape=True)
-    for activity in pkg_activity_list:
-        entry = render_datetime(activity['timestamp'],
-                                with_hours=True,
-                                with_seconds=True)
-        select_list.append(Markup(
-            template
-            .render(activity_id=activity['id'], timestamp=entry,
-                    selected='selected'
-                    if activity['id'] == current_activity_id
-                    else '')
-        ))
-
-    return select_list
-
-
-@core_helper
 def get_collaborators(package_id: str) -> list[tuple[str, str]]:
     '''Return the collaborators list for a dataset
 
     Returns a list of tuples with the user id and the capacity
     '''
-    context: Context = {'ignore_auth': True, 'user': g.user}
+    context: Context = {
+        'ignore_auth': True,
+        'user': current_user.name}
     data_dict = {'id': package_id}
     _collaborators = logic.get_action('package_collaborator_list')(
         context, data_dict)
@@ -2815,7 +2720,7 @@ def can_update_owner_org(
     collaborators_can_change_owner_org = authz.check_config_permission(
         'allow_collaborators_to_change_owner_org')
 
-    user = model.User.get(g.user)
+    user = model.User.get(current_user.name)
 
     if (user
             and authz.check_config_permission('allow_dataset_collaborators')
@@ -2873,3 +2778,31 @@ def check_ckan_version(min_version: Optional[str] = None,
     """
     return p.toolkit.check_ckan_version(min_version=min_version,
                                         max_version=max_version)
+
+
+def make_login_url(
+    login_view: str, next_url: Optional[str] = None, next_field: str = "next"
+) -> str:
+    '''
+    Creates a URL for redirecting to a login page. If only `login_view` is
+    provided, this will just return the URL for it. If `next_url` is provided,
+    however, this will append a ``next=URL`` parameter to the query string
+    so that the login view can redirect back to that URL.
+    '''
+    base = login_view
+    if next_url is None:
+        return base
+
+    if url_is_local(next_url):
+        md = {}
+        md[next_field] = urlparse(next_url).path
+        parsed_base = urlparse(base)
+        netloc = parsed_base.netloc
+        parsed_base = parsed_base._replace(netloc=netloc, query=urlencode(md))
+        return urlunparse(parsed_base)
+    return base
+
+
+@core_helper
+def csrf_input():
+    return snippet('snippets/csrf_input.html')

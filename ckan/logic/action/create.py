@@ -33,8 +33,8 @@ import ckan.lib.api_token as api_token
 import ckan.authz as authz
 import ckan.model
 
-from ckan.common import _, config
-from ckan.types import Context, DataDict, ErrorDict, Schema, FlattenErrorDict
+from ckan.common import _
+from ckan.types import Context, DataDict, ErrorDict, Schema
 
 # FIXME this looks nasty and should be shared better
 from ckan.logic.action.update import _update_package_relationship
@@ -115,6 +115,19 @@ def package_create(
         dictionary should have keys ``'key'`` (a string), ``'value'`` (a
         string)
     :type extras: list of dataset extra dictionaries
+    :param plugin_data: private package data belonging to plugins.
+        Only sysadmin users may set this value. It should be a dict that can
+        be dumped into JSON, and plugins should namespace their data with the
+        plugin name to avoid collisions with other plugins, eg::
+
+            {
+                "name": "test-dataset",
+                "plugin_data": {
+                    "plugin1": {"key1": "value1"},
+                    "plugin2": {"key2": "value2"}
+                }
+            }
+    :type plugin_data: dict
     :param relationships_as_object: see :py:func:`package_relationship_create`
         for the format of relationship dictionaries (optional)
     :type relationships_as_object: list of relationship dictionaries
@@ -142,7 +155,6 @@ def package_create(
 
     '''
     model = context['model']
-    session = context['session']
     user = context['user']
 
     if 'type' not in data_dict:
@@ -186,13 +198,15 @@ def package_create(
         model.Session.rollback()
         raise ValidationError(errors)
 
+    plugin_data = data.get('plugin_data', False)
+    include_plugin_data = False
     if user:
-
         user_obj = model.User.by_name(six.ensure_text(user))
         if user_obj:
             data['creator_user_id'] = user_obj.id
+            include_plugin_data = user_obj.sysadmin and plugin_data
 
-    pkg = model_save.package_dict_save(data, context)
+    pkg = model_save.package_dict_save(data, context, include_plugin_data)
 
     # Needed to let extensions know the package and resources ids
     model.Session.flush()
@@ -224,17 +238,6 @@ def package_create(
              'ignore_auth': True},
             {'package': data})
 
-    # Create activity
-    if not pkg.private:
-        user_obj = model.User.by_name(user)
-        if user_obj:
-            user_id = user_obj.id
-        else:
-            user_id = 'not logged in'
-
-        activity = pkg.activity_stream_item('new', user_id)
-        session.add(activity)
-
     if not context.get('defer_commit'):
         model.repo.commit()
 
@@ -244,7 +247,8 @@ def package_create(
         return pkg.id
 
     return _get_action('package_show')(
-        context.copy(), {'id': pkg.id}
+        context.copy(),
+        {'id': pkg.id, 'include_plugin_data': include_plugin_data}
     )
 
 
@@ -294,7 +298,9 @@ def resource_create(context: Context,
     if not data_dict.get('url'):
         data_dict['url'] = ''
 
-    pkg_dict = _get_action('package_show')(context, {'id': package_id})
+    package_show_context: Union[Context, Any] = dict(context, for_update=True)
+    pkg_dict = _get_action('package_show')(
+        package_show_context, {'id': package_id})
 
     _check_access('resource_create', context, data_dict)
 
@@ -767,30 +773,8 @@ def _group_or_org_create(context: Context,
     for item in plugins.PluginImplementations(plugin_type):
         item.create(group)
 
-    if is_org:
-        activity_type = 'new organization'
-    else:
-        activity_type = 'new group'
-
     user_obj = model.User.by_name(six.ensure_text(user))
     assert user_obj
-
-    activity_dict: dict[str, Any] = {
-        'user_id': user_obj.id,
-        'object_id': group.id,
-        'activity_type': activity_type,
-    }
-    activity_dict['data'] = {
-        'group': ckan.lib.dictization.table_dictize(group, context)
-    }
-    activity_create_context: Context = {
-        'model': model,
-        'user': user,
-        'defer_commit': True,
-        'ignore_auth': True,
-        'session': session
-    }
-    logic.get_action('activity_create')(activity_create_context, activity_dict)
 
     upload.upload(uploader.get_max_image_size())
 
@@ -1028,28 +1012,12 @@ def user_create(context: Context,
 
     user = model_save.user_dict_save(data, context)
     signals.user_created.send(user.name, user=user)
-    # Flush the session to cause user.id to be initialised, because
-    # activity_create() (below) needs it.
-    session.flush()
-
-    activity_create_context: Context = {
-        'model': model,
-        'user': context['user'],
-        'defer_commit': True,
-        'ignore_auth': True,
-        'session': session
-    }
-    activity_dict = {
-        'user_id': user.id,
-        'object_id': user.id,
-        'activity_type': 'new user',
-    }
-    logic.get_action('activity_create')(activity_create_context, activity_dict)
 
     upload.upload(uploader.get_max_image_size())
 
     if not context.get('defer_commit'):
-        model.repo.commit()
+        with logic.guard_against_duplicated_email(data_dict['email']):
+            model.repo.commit()
 
     # A new context is required for dictizing the newly constructed user in
     # order that all the new user's data is returned, in particular, the
@@ -1095,7 +1063,6 @@ def user_invite(context: Context,
     :returns: the newly created user
     :rtype: dictionary
     '''
-    import string
     _check_access('user_invite', context, data_dict)
 
     schema = context.get('schema',
@@ -1110,24 +1077,16 @@ def user_invite(context: Context,
         raise NotFound()
 
     name = _get_random_username_from_email(data['email'])
-    # Choose a password. However it will not be used - the invitee will not be
-    # told it - they will need to reset it
-    while True:
-        password = ''.join(random.SystemRandom().choice(
-            string.ascii_lowercase + string.ascii_uppercase + string.digits)
-            for _ in range(12))
-        # Occasionally it won't meet the constraints, so check
-        validation_errors: FlattenErrorDict = {}
-        ckan.logic.validators.user_password_validator(
-            ('password', ), {('password', ): password},
-            validation_errors, context)
-        if not validation_errors:
-            break
 
     data['name'] = name
-    data['password'] = password
+    # send the proper schema when creating a user from here
+    # so the password field would be ignored.
+    invite_schema = ckan.logic.schema.create_user_for_user_invite_schema()
+
     data['state'] = model.State.PENDING
-    user_dict = _get_action('user_create')(context, data)
+    user_dict = _get_action('user_create')(
+        cast(Context, dict(context, schema=invite_schema)),
+        data)
     user = model.User.get(user_dict['id'])
     assert user
     member_dict = {
@@ -1136,14 +1095,11 @@ def user_invite(context: Context,
         'role': data['role']
     }
 
-    if group.is_organization:
-        _get_action('organization_member_create')(context, member_dict)
-        group_dict = _get_action('organization_show')(context,
-                                                      {'id': data['group_id']})
-    else:
-        _get_action('group_member_create')(context, member_dict)
-        group_dict = _get_action('group_show')(context,
-                                               {'id': data['group_id']})
+    org_or_group = 'organization' if group.is_organization else 'group'
+    _get_action(f'{org_or_group}_member_create')(context, member_dict)
+    group_dict = _get_action(f'{org_or_group}_show')(
+        context, {'id': data['group_id']})
+
     try:
         mailer.send_invite(user, group_dict, data['role'])
     except (socket_error, mailer.MailerException) as error:
@@ -1212,57 +1168,6 @@ def vocabulary_create(context: Context,
     log.debug('Created Vocabulary %s' % vocabulary.name)
 
     return model_dictize.vocabulary_dictize(vocabulary, context)
-
-
-def activity_create(context: Context,
-                    data_dict: DataDict) -> ActionResult.ActivityCreate:
-    '''Create a new activity stream activity.
-
-    You must be a sysadmin to create new activities.
-
-    :param user_id: the name or id of the user who carried out the activity,
-        e.g. ``'seanh'``
-    :type user_id: string
-    :param object_id: the name or id of the object of the activity, e.g.
-        ``'my_dataset'``
-    :param activity_type: the type of the activity, this must be an activity
-        type that CKAN knows how to render, e.g. ``'new package'``,
-        ``'changed user'``, ``'deleted group'`` etc.
-    :type activity_type: string
-    :param data: any additional data about the activity
-    :type data: dictionary
-
-    :returns: the newly created activity
-    :rtype: dictionary
-
-    '''
-
-    _check_access('activity_create', context, data_dict)
-
-    if not config.get_value('ckan.activity_streams_enabled'):
-        return
-
-    model = context['model']
-
-    # Any revision_id that the caller attempts to pass in the activity_dict is
-    # ignored and removed here.
-    if 'revision_id' in data_dict:
-        del data_dict['revision_id']
-
-    schema = context.get('schema') or \
-        ckan.logic.schema.default_create_activity_schema()
-
-    data, errors = _validate(data_dict, schema, context)
-    if errors:
-        raise ValidationError(errors)
-
-    activity = model_save.activity_dict_save(data, context)
-
-    if not context.get('defer_commit'):
-        model.repo.commit()
-
-    log.debug("Created '%s' activity" % activity.activity_type)
-    return model_dictize.activity_dictize(activity, context)
 
 
 def tag_create(context: Context,

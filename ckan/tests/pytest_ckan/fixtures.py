@@ -86,11 +86,6 @@ class TagFactory(factories.Tag):
 
 
 @register
-class ActivityFactory(factories.Activity):
-    pass
-
-
-@register
 class SystemInfoFactory(factories.SystemInfo):
     pass
 
@@ -149,6 +144,12 @@ def make_app(ckan_config):
     Unless you need to create app instances lazily for some reason,
     use the ``app`` fixture instead.
     """
+    from ckan.lib.app_globals import _CONFIG_CACHE
+    # Reset values cached during the previous tests. Otherwise config values
+    # that were added to app_globals reset the patched versions from
+    # `ckan_config` mark.
+    _CONFIG_CACHE.clear()
+
     return test_helpers._get_test_app
 
 
@@ -333,14 +334,14 @@ def with_extended_cli(ckan_config, monkeypatch):
 
 
 @pytest.fixture(scope="session")
-def _reset_db_once(reset_db):
+def reset_db_once(reset_db):
     """Internal fixture that cleans DB only the first time it's used.
     """
     reset_db()
 
 
 @pytest.fixture
-def non_clean_db(_reset_db_once):
+def non_clean_db(reset_db_once):
     """Guarantees that DB is initialized.
 
     This fixture either initializes DB if it hasn't been done yet or does

@@ -119,7 +119,8 @@ def default_create_package_schema(
         ignore_not_package_admin: Validator, boolean_validator: Validator,
         datasets_with_no_organization_cannot_be_private: Validator,
         empty: Validator, tag_string_convert: Validator,
-        owner_org_validator: Validator):
+        owner_org_validator: Validator, json_object: Validator,
+        ignore_not_sysadmin: Validator):
     return cast(Schema, {
         '__before': [duplicate_extras_key, ignore],
         'id': [empty_if_not_sysadmin, ignore_missing, unicode_safe,
@@ -147,6 +148,7 @@ def default_create_package_schema(
         'resources': default_resource_schema(),
         'tags': default_tags_schema(),
         'tag_string': [ignore_missing, tag_string_convert],
+        'plugin_data': [ignore_missing, json_object, ignore_not_sysadmin],
         'extras': default_extras_schema(),
         'save': [ignore],
         'return_to': [ignore],
@@ -413,7 +415,7 @@ def default_user_schema(
         ignore_missing: Validator, unicode_safe: Validator,
         name_validator: Validator, user_name_validator: Validator,
         user_password_validator: Validator, user_password_not_empty: Validator,
-        email_is_unique: Validator, ignore_not_sysadmin: Validator,
+        ignore_not_sysadmin: Validator,
         not_empty: Validator, strip_value: Validator,
         email_validator: Validator, user_about_validator: Validator,
         ignore: Validator, boolean_validator: Validator,
@@ -426,7 +428,7 @@ def default_user_schema(
         'password': [user_password_validator, user_password_not_empty,
                      ignore_missing, unicode_safe],
         'password_hash': [ignore_missing, ignore_not_sysadmin, unicode_safe],
-        'email': [not_empty, strip_value, email_validator, email_is_unique,
+        'email': [not_empty, strip_value, email_validator,
                   unicode_safe],
         'about': [ignore_missing, user_about_validator, unicode_safe],
         'created': [ignore],
@@ -434,11 +436,18 @@ def default_user_schema(
         'reset_key': [ignore],
         'activity_streams_email_notifications': [ignore_missing,
                                                  boolean_validator],
-        'state': [ignore_missing],
+        'state': [ignore_missing, ignore_not_sysadmin],
         'image_url': [ignore_missing, unicode_safe],
         'image_display_url': [ignore_missing, unicode_safe],
         'plugin_extras': [ignore_missing, json_object, ignore_not_sysadmin],
     })
+
+
+@validator_args
+def create_user_for_user_invite_schema(ignore_missing: Validator):
+    schema = default_user_schema()
+    schema['password'] = [ignore_missing]
+    return schema
 
 
 @validator_args
@@ -542,25 +551,6 @@ def default_update_vocabulary_schema(
 
 
 @validator_args
-def default_create_activity_schema(
-        ignore: Validator, not_missing: Validator, not_empty: Validator,
-        unicode_safe: Validator, convert_user_name_or_id_to_id: Validator,
-        object_id_validator: Validator, activity_type_exists: Validator,
-        ignore_empty: Validator, ignore_missing: Validator):
-    return cast(Schema, {
-        'id': [ignore],
-        'timestamp': [ignore],
-        'user_id': [not_missing, not_empty, unicode_safe,
-                    convert_user_name_or_id_to_id],
-        'object_id': [
-            not_missing, not_empty, unicode_safe, object_id_validator],
-        'activity_type': [not_missing, not_empty, unicode_safe,
-                          activity_type_exists],
-        'data': [ignore_empty, ignore_missing],
-    })
-
-
-@validator_args
 def default_follow_user_schema(not_missing: Validator, not_empty: Validator,
                                unicode_safe: Validator,
                                convert_user_name_or_id_to_id: Validator,
@@ -621,41 +611,6 @@ def default_pagination_schema(ignore_missing: Validator,
         'limit': [ignore_missing, natural_number_validator],
         'offset': [ignore_missing, natural_number_validator]
     })
-
-
-@validator_args
-def default_dashboard_activity_list_schema(
-        configured_default: ValidatorFactory,
-        natural_number_validator: Validator,
-        limit_to_configured_maximum: ValidatorFactory):
-    schema = default_pagination_schema()
-    schema['limit'] = [
-        configured_default('ckan.activity_list_limit', 31),
-        natural_number_validator,
-        limit_to_configured_maximum('ckan.activity_list_limit_max', 100)]
-    return schema
-
-
-@validator_args
-def default_activity_list_schema(
-        not_missing: Validator, unicode_safe: Validator,
-        configured_default: ValidatorFactory,
-        natural_number_validator: Validator,
-        limit_to_configured_maximum: ValidatorFactory,
-        ignore_missing: Validator, boolean_validator: Validator,
-        ignore_not_sysadmin: Validator, list_of_strings: Validator):
-
-    schema = default_pagination_schema()
-    schema['id'] = [not_missing, unicode_safe]
-    schema['limit'] = [
-        configured_default('ckan.activity_list_limit', 31),
-        natural_number_validator,
-        limit_to_configured_maximum('ckan.activity_list_limit_max', 100)]
-    schema['include_hidden_activity'] = [
-        ignore_missing, ignore_not_sysadmin, boolean_validator]
-    schema['activity_types'] = [ignore_missing, list_of_strings]
-    schema['exclude_activity_types'] = [ignore_missing, list_of_strings]
-    return schema
 
 
 @validator_args
@@ -787,7 +742,7 @@ def default_update_configuration_schema(unicode_safe: Validator,
         'ckan.site_about': [ignore_missing, unicode_safe],
         'ckan.site_intro_text': [ignore_missing, unicode_safe],
         'ckan.site_custom_css': [ignore_missing, unicode_safe],
-        'ckan.main_css': [ignore_missing, unicode_safe],
+        'ckan.theme': [ignore_missing, unicode_safe],
         'ckan.homepage_style': [ignore_missing, is_positive_integer],
         'logo_upload': [ignore_missing, unicode_safe],
         'clear_logo_upload': [ignore_missing, unicode_safe],
@@ -881,7 +836,6 @@ def package_revise_schema(ignore_missing: Validator,
 def config_declaration_v1(
         ignore_missing: Validator, unicode_safe: Validator,
         not_empty: Validator, default: ValidatorFactory,
-        boolean_validator: Validator,
         dict_only: Validator, one_of: ValidatorFactory,
         ignore_empty: Validator):
     from ckan.config.declaration import Key
@@ -901,22 +855,18 @@ def config_declaration_v1(
     return cast(Schema, {
         "groups": {
             "annotation": [default(""), unicode_safe],
+            "section": [default("app:main"), unicode_safe],
             "options": {
                 "key": [not_empty, key_from_string],
                 "default": [ignore_missing],
-                "example": [ignore_missing],
                 "default_callable": [ignore_empty, importable_string],
+                "placeholder": [default(""), unicode_safe],
                 "placeholder_callable": [ignore_empty, importable_string],
                 "callable_args": [ignore_empty, dict_only],
+                "example": [ignore_missing],
                 "description": [default(""), unicode_safe],
-                "placeholder": [default(""), unicode_safe],
                 "validators": [default(""), unicode_safe],
                 "type": [default("base"), one_of(list(option_types))],
-
-                "ignored": [default(False), boolean_validator],
-                "experimental": [default(False), boolean_validator],
-                "internal": [default(False), boolean_validator],
-                "required": [default(False), boolean_validator],
             }
         }
     })

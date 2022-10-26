@@ -10,10 +10,13 @@ import ckan.tests.helpers as helpers
 import ckan.tests.factories as factories
 import ckan.logic as logic
 from ckan import model
+from unittest import mock
 
 
 @pytest.mark.ckan_config(u"ckan.auth.public_user_details", u"false")
-def test_auth_user_list():
+@mock.patch("flask_login.utils._get_user")
+def test_auth_user_list(current_user):
+    current_user.return_value = mock.Mock(is_anonymous=True)
     context = {"user": None, "model": model}
     with pytest.raises(logic.NotAuthorized):
         helpers.call_auth("user_list", context=context)
@@ -34,9 +37,11 @@ def test_user_list_email_parameter():
 @pytest.mark.usefixtures(u"non_clean_db")
 class TestGetAuth(object):
     @pytest.mark.ckan_config(u"ckan.auth.public_user_details", u"false")
-    def test_auth_user_show(self):
+    @mock.patch("flask_login.utils._get_user")
+    def test_auth_user_show(self, current_user):
         fred = factories.User()
         fred["capacity"] = "editor"
+        current_user.return_value = mock.Mock(is_anonymous=True)
         context = {"user": None, "model": model}
         with pytest.raises(logic.NotAuthorized):
             helpers.call_auth("user_show", context=context, id=fred["id"])
@@ -163,39 +168,6 @@ class TestGetAuth(object):
         fred = factories.Sysadmin()
         context = {"user": fred["name"], "model": None}
         assert helpers.call_auth("config_option_list", context=context)
-
-    @pytest.mark.ckan_config(
-        u"ckan.auth.public_activity_stream_detail", u"false"
-    )
-    def test_config_option_public_activity_stream_detail_denied(self):
-        """Config option says an anon user is not authorized to get activity
-            stream data/detail.
-            """
-        dataset = factories.Dataset()
-        context = {"user": None, "model": model}
-        with pytest.raises(logic.NotAuthorized):
-            helpers.call_auth(
-                "package_activity_list",
-                context=context,
-                id=dataset["id"],
-                include_data=True,
-            )
-
-    @pytest.mark.ckan_config(
-        u"ckan.auth.public_activity_stream_detail", u"true"
-    )
-    def test_config_option_public_activity_stream_detail(self):
-        """Config option says an anon user is authorized to get activity
-            stream data/detail.
-            """
-        dataset = factories.Dataset()
-        context = {"user": None, "model": model}
-        helpers.call_auth(
-            "package_activity_list",
-            context=context,
-            id=dataset["id"],
-            include_data=True,
-        )
 
 
 @pytest.mark.usefixtures("non_clean_db")
@@ -629,3 +601,71 @@ class TestStatusShow:
     def test_status_show_is_visible_to_anonymous(self):
         context = {"user": "", "model": model}
         assert helpers.call_auth("status_show", context)
+
+
+@pytest.mark.usefixtures("non_clean_db")
+class TestFolloweeCount:
+
+    functions = [
+        "dataset_followee_count",
+        "followee_count",
+        "group_followee_count",
+        "organization_followee_count",
+        "user_followee_count",
+    ]
+
+    @pytest.mark.parametrize("func", functions)
+    def test_anonymous_can_see_followee_count(self, func):
+        user = factories.User()
+        context = {"user": "", "model": model}
+        assert helpers.call_auth(func, context, id=user["id"])
+
+
+@pytest.mark.usefixtures("non_clean_db")
+class TestFollowerCount:
+
+    functions = [
+        "dataset_follower_count",
+        "group_follower_count",
+        "organization_follower_count",
+        "user_follower_count",
+    ]
+
+    @pytest.mark.parametrize("func", functions)
+    def test_anonymous_can_see_follower_count(self, func):
+        user = factories.User()
+        context = {"user": "", "model": model}
+        assert helpers.call_auth(func, context, id=user["id"])
+
+
+@pytest.mark.usefixtures("non_clean_db")
+class TestAmFollowing:
+
+    functions = [
+        "am_following_dataset",
+        "am_following_group",
+        "am_following_user",
+    ]
+
+    @pytest.mark.parametrize("func", functions)
+    def test_anonymous_can_see_am_following(self, func):
+        user = factories.User()
+        context = {"user": "", "model": model}
+        assert helpers.call_auth(func, context, id=user["id"])
+
+
+class TestVariousGetMethods:
+
+    functions = [
+        "group_package_show",
+        "member_list",
+        "resource_search",
+        "tag_search",
+        "term_translation_show",
+    ]
+
+    @pytest.mark.parametrize("func", functions)
+    def test_anonymous_can_call_get_method(self, func):
+        user = factories.User()
+        context = {"user": "", "model": model}
+        assert helpers.call_auth(func, context, id=user["id"])

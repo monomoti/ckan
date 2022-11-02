@@ -132,7 +132,8 @@ def get_user_from_token(token, update_access_time=True):
     # So we get a user by email.
     if u"jti" not in data:
         user = model.User.by_email(data[u"unique_name"])
-        return user
+        if len(user):
+            return user[0]
 
     token_obj = model.ApiToken.get(data[u"jti"])
     if not token_obj:

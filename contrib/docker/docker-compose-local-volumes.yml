@@ -45,12 +45,28 @@ services:
       - ckan_home:/usr/lib/ckan
       - ckan_storage:/var/lib/ckan
 
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#logging:
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#  driver: awslogs
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#  options:
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#    awslogs-region: ap-northeast-1
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#    awslogs-group: ckan
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#    awslogs-create-group: 'true'
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#    awslogs-stream: ckan
+
+
   datapusher:
     container_name: datapusher
     image: clementmouchet/datapusher
     ports:
       - "8800:8800"
     restart: unless-stopped
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#logging:
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#  driver: awslogs
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#  options:
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#    awslogs-region: ap-northeast-1
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#    awslogs-group: ckan
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#    awslogs-create-group: 'true'
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#    awslogs-stream: datapusher
 
   solr:
     container_name: solr
@@ -62,6 +78,13 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:8983/solr/"]
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#logging:
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#  driver: awslogs
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#  options:
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#    awslogs-region: ap-northeast-1
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#    awslogs-group: ckan
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#    awslogs-create-group: 'true'
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#    awslogs-stream: solr
 
   redis:
     container_name: redis
@@ -69,3 +92,11 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "-e", "QUIT"]
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#logging:
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#  driver: awslogs
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#  options:
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#    awslogs-region: ap-northeast-1
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#    awslogs-group: ckan
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#    awslogs-create-group: 'true'
+    #TO_BE_UNCOMMENTED_IN_LAUNCH#    awslogs-stream: redis
+

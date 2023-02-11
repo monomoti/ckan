@@ -82,13 +82,24 @@ schema. In this case the version should be set to the next CKAN version number.
         </analyzer>
     </fieldType>
 
-    <fieldType name="text_ngram" class="solr.TextField" positionIncrementGap="100">
+    <!-- <fieldType name="text_ngram" class="solr.TextField" positionIncrementGap="100">
       <analyzer type="index">
         <tokenizer class="solr.NGramTokenizerFactory" minGramSize="2" maxGramSize="10"/>
         <filter class="solr.LowerCaseFilterFactory"/>
       </analyzer>
       <analyzer type="query">
         <tokenizer class="solr.WhitespaceTokenizerFactory"/>
+        <filter class="solr.LowerCaseFilterFactory"/>
+      </analyzer>
+    </fieldType> -->
+
+    <fieldType name="text_ngram" class="solr.TextField" positionIncrementGap="100">
+      <analyzer type="index">
+        <tokenizer class="solr.NGramTokenizerFactory" minGramSize="5" maxGramSize="10"/>
+        <filter class="solr.LowerCaseFilterFactory"/>
+      </analyzer>
+      <analyzer type="query">
+        <tokenizer class="solr.NGramTokenizerFactory" minGramSize="5" maxGramSize="10"/>
         <filter class="solr.LowerCaseFilterFactory"/>
       </analyzer>
     </fieldType>
@@ -136,7 +147,7 @@ schema. In this case the version should be set to the next CKAN version number.
 
     <!-- catchall field, containing all other searchable text fields (implemented
          via copyField further on in this schema  -->
-    <field name="text" type="text" indexed="true" stored="false" multiValued="true"/>
+    <field name="text" type="text_ngram" indexed="true" stored="false" multiValued="true"/>
     <field name="urls" type="text" indexed="true" stored="false" multiValued="true"/>
 
     <field name="depends_on" type="text" indexed="true" stored="false" multiValued="true"/>
